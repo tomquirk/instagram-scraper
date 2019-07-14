@@ -10,6 +10,7 @@ from .session_manager import CookieSessionManager
 from .exception.instagram_auth_exception import InstagramAuthException
 from .exception.instagram_exception import InstagramException
 from .exception.instagram_not_found_exception import InstagramNotFoundException
+from .exception.instagram_blocked_exception import InstagramBlockedException
 from .model.account import Account
 from .model.comment import Comment
 from .model.location import Location
@@ -152,8 +153,8 @@ class Instagram:
             for key in session.keys():
                 cookies += f"{key}={session[key]}; "
 
-            csrf = session['x-csrftoken'] if session['csrftoken'] is None else \
-                session['csrftoken']
+            csrf = session['x-csrftoken'] if session.get('csrftoken') is None else \
+                session.get('csrftoken')
 
             headers = {
                 'cookie': cookies,
@@ -1321,7 +1322,9 @@ class Instagram:
                         and two_step_verificator is not None):
                     response = self.__verify_two_step(response, cookies,
                                                       two_step_verificator)
-                    print('checkpoint required')
+                    if not response.status_code == Instagram.HTTP_OK:
+                        raise InstagramAuthException('Two step verification failed.')
+
 
                 elif response.status_code is not None and response.text is not None:
                     raise InstagramAuthException(
@@ -1331,9 +1334,9 @@ class Instagram:
                     raise InstagramAuthException(
                         'Something went wrong. Please report issue.',
                         response.status_code)
-
-            if not response.json()['authenticated']:
-                raise InstagramAuthException('User credentials are wrong.')
+            else:
+                if not response.json()['authenticated']:
+                    raise InstagramAuthException('User credentials are wrong.')
 
             cookies = response.cookies.get_dict()
 
@@ -1398,14 +1401,16 @@ class Instagram:
 
                 except KeyError:
                     pass
-
+            
             if len(choices) > 0:
-                selected_choice = two_step_verificator.get_verification_type(
+                choice_data = two_step_verificator.get_verification_type(
                     choices)
                 response = self.__req.post(url,
-                                           data={'choice': selected_choice},
+                                           data=choice_data,
                                            headers=headers)
 
+        if re.findall('Your account has been disabled for violating our terms', response.text):
+            raise InstagramBlockedException('Your account has been disabled for violating IGs terms.')
         if len(re.findall('name="security_code"', response.text)) <= 0:
             raise InstagramAuthException(
                 'Something went wrong when try '
